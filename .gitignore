@@ -1,0 +1,5 @@
+send.py
+*.log
+*.pdf
+.idea/
+__pycache__/
