@@ -38,8 +38,10 @@ NULLABLE_VALUES = ['', {}, (), [], None]
 SEVENTY_YEARS = timedelta(days=365)*70
 SCORE_PAIRS = [('first_name','last_name'),('email','phone'),('birthday','gender')]
 
+
 class ValidationError(Exception):
     pass
+
 
 class BaseField(abc.ABC):
 
