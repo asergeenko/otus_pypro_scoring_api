@@ -38,6 +38,9 @@ NULLABLE_VALUES = ['', {}, (), [], None]
 SEVENTY_YEARS = timedelta(days=365)*70
 SCORE_PAIRS = [('first_name','last_name'),('email','phone'),('birthday','gender')]
 
+class ValidationError(Exception):
+    pass
+
 class BaseField(abc.ABC):
 
     def __init__(self, required=False, nullable=True):
@@ -47,9 +50,9 @@ class BaseField(abc.ABC):
     @abc.abstractmethod
     def validate(self, value):
         if self.required and value is None:
-            raise ValueError('%s is required'%(type(self).__name__,))
+            raise ValidationError('%s is required'%(type(self).__name__,))
         if not self.nullable and value in NULLABLE_VALUES:
-            raise ValueError("%s can't be nullable"%(type(self).__name__,))
+            raise ValidationError("%s can't be nullable"%(type(self).__name__,))
 
 
 class CharField(BaseField):
@@ -57,14 +60,14 @@ class CharField(BaseField):
     def validate(self, value):
         super().validate(value)
         if not isinstance(value,str):
-            raise TypeError("%s value type must be 'str'"%(type(self).__name__,))
+            raise ValidationError("%s value type must be 'str'"%(type(self).__name__,))
 
 class ArgumentsField(BaseField):
 
     def validate(self, value):
         super().validate(value)
         if not isinstance(value, dict):
-            raise TypeError("%s value type must be 'dict'"%(type(self).__name__,))
+            raise ValidationError("%s value type must be 'dict'"%(type(self).__name__,))
 
 
 class EmailField(CharField):
@@ -72,7 +75,7 @@ class EmailField(CharField):
     def validate(self, value):
         super().validate(value)
         if '@' not in value:
-            raise TypeError("%s must contain '@' character"%(type(self).__name__,))
+            raise ValidationError("%s must contain '@' character"%(type(self).__name__,))
 
 
 class PhoneField(BaseField):
@@ -82,19 +85,19 @@ class PhoneField(BaseField):
         if not value:
             return
         if not (isinstance(value,int) or isinstance(value,str)):
-            raise ValueError("%s must be 'int' or 'str'"%(type(self).__name__,))
+            raise ValidationError("%s must be 'int' or 'str'"%(type(self).__name__,))
         if isinstance(value,str):
             try:
                 int(value)
             except ValueError:
-                raise ValueError("%s must contain numbers only"%(type(self).__name__,))
+                raise ValidationError("%s must contain numbers only"%(type(self).__name__,))
         # We have an 'int'
         else:
             value = str(value)
         if len(value) != 11:
-            raise ValueError("%s length must be 11"%(type(self).__name__,))
+            raise ValidationError("%s length must be 11"%(type(self).__name__,))
         if not value.startswith('7'):
-            raise ValueError("%s must starts with 7"%(type(self).__name__,))
+            raise ValidationError("%s must starts with 7"%(type(self).__name__,))
 
 
 class DateField(CharField):
@@ -106,7 +109,7 @@ class DateField(CharField):
         try:
             return datetime.strptime(value, '%d.%m.%Y').date()
         except ValueError:
-            raise ValueError ("%s must be in 'DD.MM.YYYY' format"%(type(self).__name__,))
+            raise ValidationError("%s must be in 'DD.MM.YYYY' format"%(type(self).__name__,))
 
 
 class BirthDayField(DateField):
@@ -114,7 +117,7 @@ class BirthDayField(DateField):
     def validate(self, value):
         parsed_date = super().validate(value)
         if parsed_date and (datetime.today().date() - parsed_date > SEVENTY_YEARS):
-            raise ValueError('%s date must be at most 70 years from now'%(type(self).__name__,))
+            raise ValidationError('%s date must be at most 70 years from now'%(type(self).__name__,))
 
 
 class GenderField(BaseField):
@@ -122,9 +125,9 @@ class GenderField(BaseField):
     def validate(self, value):
         super().validate(value)
         if not isinstance(value,int):
-            raise ValueError("%s must be of type int"%(type(self).__name__,))
+            raise ValidationError("%s must be of type int"%(type(self).__name__,))
         if value not in GENDERS.keys():
-            raise ValueError("%s must be in [%s]"%(type(self).__name__,','.join(str(key) for key in GENDERS.keys())))
+            raise ValidationError("%s must be in [%s]"%(type(self).__name__,','.join(str(key) for key in GENDERS.keys())))
 
 
 
@@ -133,9 +136,9 @@ class ClientIDsField(BaseField):
     def validate(self, value):
         super().validate(value)
         if not isinstance(value,list):
-            raise ValueError("ClientIDs must be of type list")
+            raise ValidationError("ClientIDs must be of type list")
         if value and not all(isinstance(ind,int) for ind in value):
-            raise ValueError("ClientIDs list must contain int values only")
+            raise ValidationError("ClientIDs list must contain int values only")
 
 
 class RequestMetaClass(type):
@@ -164,7 +167,7 @@ class RequestBase(metaclass=RequestMetaClass):
             try:
                 value.validate(val)
                 setattr(self, key, val)
-            except (ValueError, TypeError) as e:
+            except ValidationError as e:
                 self._errors[key] = str(e)
 
     @property
@@ -236,17 +239,17 @@ def method_handler(request, ctx, store):
         return method_request.errors, INVALID_REQUEST
 
     if not check_auth(method_request):
-        return ERRORS[FORBIDDEN], FORBIDDEN
+        return 'Authentication failed for user "%s"'%(method_request.login,), FORBIDDEN
 
-    REQUEST_METHODS = {
+    request_classes = {
         'online_score': OnlineScoreRequest,
         'clients_interests': ClientsInterestsRequest
     }
 
-    if method_request.method not in REQUEST_METHODS:
+    if method_request.method not in request_classes:
         return "Method '%s' not found"%(method_request.method,), NOT_FOUND
 
-    r = REQUEST_METHODS[method_request.method](method_request.arguments)
+    r = request_classes[method_request.method](method_request.arguments)
     r.validate()
     result = r.get_result(method_request.is_admin, ctx, store)
 
